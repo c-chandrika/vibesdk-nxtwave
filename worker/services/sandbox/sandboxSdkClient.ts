@@ -962,6 +962,11 @@ export class SandboxSdkClient extends BaseSandboxService {
                             previewURL = previewURL.replace(env.CUSTOM_DOMAIN, previewDomain);
                         }
                     }
+                    
+                    // Ensure localhost URLs use http instead of https
+                    if (previewURL.includes('localhost') || previewURL.includes('127.0.0.1')) {
+                        previewURL = previewURL.replace('https://', 'http://');
+                    }
 
                     if(env.USE_TUNNEL_FOR_PREVIEW) {
                         this.logger.info('Using tunnel url instead for preview as configured', { instanceId, tunnelURL });

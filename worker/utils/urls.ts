@@ -1,5 +1,6 @@
 export const getProtocolForHost = (host: string): string => {
-    if (host.startsWith('localhost') || host.startsWith('127.0.0.1') || host.startsWith('0.0.0.0') || host.startsWith('::1')) {
+    // Check if host is localhost or any localhost subdomain (e.g., anything.localhost or localhost:5173)
+    if (host.includes('localhost') || host.includes('127.0.0.1') || host.includes('0.0.0.0') || host.includes('::1')) {
         return 'http';
     } else {
         return 'https';
