@@ -4,7 +4,7 @@
  */
  {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "vibesdk",
+	"name": "vibesdk-nxtwave",
 	"main": "worker/index.ts",
 	"compatibility_date": "2025-08-10",
 	"compatibility_flags": ["nodejs_compat"],
@@ -169,7 +169,8 @@
             },
             "version": "1.0.0"
         },
-        "CUSTOM_DOMAIN": "",
+        "CUSTOM_DOMAIN": "vibesdk-nxtwave.earlywave.in",
+        "CUSTOM_PREVIEW_DOMAIN": "vibesdk-nxtwave.earlywave.in",
         "MAX_SANDBOX_INSTANCES": "10",
         "SANDBOX_INSTANCE_TYPE": "standard-3"
     },
