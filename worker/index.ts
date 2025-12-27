@@ -162,8 +162,12 @@ const worker = {
 		// --- Domain-based Routing ---
 
 		// Normalize hostnames for both local development (localhost) and production.
+		// Also accept requests from workers.dev URLs (e.g., worker-name.web-1c2.workers.dev)
+		const isWorkersDevRequest = hostname.endsWith('.workers.dev');
 		const isMainDomainRequest =
-			hostname === env.CUSTOM_DOMAIN || hostname === 'localhost';
+			hostname === env.CUSTOM_DOMAIN || 
+			hostname === 'localhost' || 
+			isWorkersDevRequest;
 		const isSubdomainRequest =
 			hostname.endsWith(`.${previewDomain}`) ||
 			(hostname.endsWith('.localhost') && hostname !== 'localhost');
