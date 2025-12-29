@@ -727,21 +727,27 @@ export class CodeGeneratorAgent extends Agent<Env, AgentState> implements AgentI
             contentType
         });
 
-        let content = file.fileContents;
+        const isHeadRequest = request.method.toUpperCase() === 'HEAD';
+        
+        // For HEAD requests, we only need headers, no body
+        let content: string | null = null;
+        if (!isHeadRequest) {
+            content = file.fileContents;
 
-        // For HTML files, inject base tag
-        if (normalized.endsWith('.html') || contentType.includes('text/html')) {
-            const baseTag = `<base href="/">`;
+            // For HTML files, inject base tag
+            if (normalized.endsWith('.html') || contentType.includes('text/html')) {
+                const baseTag = `<base href="/">`;
 
-            // Inject base tag after <head> tag if present
-            if (content.includes('<head>')) {
-                content = content.replace(/<head>/i, `<head>\n  ${baseTag}`);
-            } else {
-                // Fallback: inject at the beginning
-                content = baseTag + '\n' + content;
+                // Inject base tag after <head> tag if present
+                if (content.includes('<head>')) {
+                    content = content.replace(/<head>/i, `<head>\n  ${baseTag}`);
+                } else {
+                    // Fallback: inject at the beginning
+                    content = baseTag + '\n' + content;
+                }
+
+                this.logger().info('[BROWSER SERVING] Injected base tag');
             }
-
-            this.logger().info('[BROWSER SERVING] Injected base tag');
         }
 
         return new Response(content, {
@@ -750,7 +756,7 @@ export class CodeGeneratorAgent extends Agent<Env, AgentState> implements AgentI
                 'Content-Type': contentType,
                 'Cache-Control': 'no-cache, no-store, must-revalidate',
                 'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'GET, OPTIONS',
+                'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
                 'Access-Control-Allow-Headers': '*',
                 'X-Sandbox-Type': 'browser-native'
             }

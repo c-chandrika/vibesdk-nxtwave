@@ -92,7 +92,11 @@ async function handleUserAppRequest(request: Request, env: Env): Promise<Respons
         headers.append('Vary', 'Origin');
 		headers.set('Access-Control-Expose-Headers', 'X-Preview-Type');
 		
-		return new Response(sandboxResponse.body, {
+		// For HEAD requests, ensure no body is sent (HTTP spec compliance)
+		const isHeadRequest = request.method.toUpperCase() === 'HEAD';
+		const responseBody = isHeadRequest ? null : sandboxResponse.body;
+		
+		return new Response(responseBody, {
 			status: sandboxResponse.status,
 			statusText: sandboxResponse.statusText,
 			headers,
@@ -122,7 +126,11 @@ async function handleUserAppRequest(request: Request, env: Env): Promise<Respons
         headers.append('Vary', 'Origin');
 		headers.set('Access-Control-Expose-Headers', 'X-Preview-Type');
 
-		return new Response(dispatcherResponse.body, {
+		// For HEAD requests, ensure no body is sent (HTTP spec compliance)
+		const isHeadRequest = request.method.toUpperCase() === 'HEAD';
+		const responseBody = isHeadRequest ? null : dispatcherResponse.body;
+
+		return new Response(responseBody, {
 			status: dispatcherResponse.status,
 			statusText: dispatcherResponse.statusText,
 			headers,
