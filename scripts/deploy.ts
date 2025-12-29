@@ -1328,10 +1328,11 @@ class CloudflareDeploymentManager {
 			let userAppInstanceType: any;
 
 			if (sandboxInstanceType === 'enhanced') {
-				// Enhanced configuration as specified
+				// Enhanced configuration: 4 vCPU requires at least 12 GiB (12288 MiB) memory
+				// Cloudflare requires minimum 3 GiB per vCPU
 				userAppInstanceType = {
 					vcpu: 4,
-					memory_mib: 8192,
+					memory_mib: 12288,
 					disk_mb: 10240
 				};
 				console.log('   Using enhanced instance type configuration');
