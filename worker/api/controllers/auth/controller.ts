@@ -77,11 +77,11 @@ export class AuthController extends BaseController {
             setSecureAuthCookies(response, {
                 accessToken: result.accessToken,
                 accessTokenExpiry: SessionService.config.sessionTTL
-            });
+            }, request);
             
             // Rotate CSRF token on successful registration if configured
             if (CsrfService.defaults.rotateOnAuth) {
-                CsrfService.rotateToken(response);
+                CsrfService.rotateToken(response, request);
             }
             
             return response;
@@ -132,11 +132,11 @@ export class AuthController extends BaseController {
             setSecureAuthCookies(response, {
                 accessToken: result.accessToken,
                 accessTokenExpiry: SessionService.config.sessionTTL
-            });
+            }, request);
             
             // Rotate CSRF token on successful login if configured
             if (CsrfService.defaults.rotateOnAuth) {
-                CsrfService.rotateToken(response);
+                CsrfService.rotateToken(response, request);
             }
             
             return response;
@@ -346,7 +346,7 @@ export class AuthController extends BaseController {
             
             setSecureAuthCookies(response, {
                 accessToken: result.accessToken,
-            });
+            }, request);
             
             return response;
         } catch (error) {
@@ -662,7 +662,7 @@ export class AuthController extends BaseController {
             setSecureAuthCookies(response, {
                 accessToken: result.accessToken,
                 accessTokenExpiry: SessionService.config.sessionTTL
-            });
+            }, request);
             
             return response;
         } catch (error) {
@@ -722,7 +722,7 @@ export class AuthController extends BaseController {
             
             // Set the token in cookie with proper expiration
             const maxAge = Math.floor(CsrfService.defaults.tokenTTL / 1000);
-            CsrfService.setTokenCookie(response, token, maxAge);
+            CsrfService.setTokenCookie(response, token, maxAge, request);
             
             return response;
         } catch (error) {
@@ -760,7 +760,7 @@ export class AuthController extends BaseController {
             
             // Set CSRF token cookie with proper expiration
             const maxAge = Math.floor(CsrfService.defaults.tokenTTL / 1000);
-            CsrfService.setTokenCookie(response, csrfToken, maxAge);
+            CsrfService.setTokenCookie(response, csrfToken, maxAge, request);
             
             return response;
         } catch (error) {

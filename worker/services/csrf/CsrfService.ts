@@ -32,18 +32,55 @@ export class CsrfService {
     
     /**
      * Set CSRF token cookie with timestamp
+     * Domain-aware: cookies are set for the request origin (localhost or workers.dev)
      */
-    static setTokenCookie(response: Response, token: string, maxAge: number = 7200): void {
+    static setTokenCookie(response: Response, token: string, maxAge: number = 7200, request?: Request): void {
         const tokenData: CSRFTokenData = {
             token,
             timestamp: Date.now()
         };
         
+        // Determine cookie domain based on request origin
+        let cookieDomain: string | undefined;
+        let secure = true;
+        let sameSite: 'Strict' | 'Lax' | 'None' = 'Lax'; // Use Lax to allow cross-domain navigation
+        
+        if (request) {
+            const url = new URL(request.url);
+            const hostname = url.hostname;
+            const protocol = url.protocol;
+            
+            // For localhost, don't set domain and use http (secure=false for local dev)
+            if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.includes('localhost')) {
+                secure = protocol === 'https:'; // Only secure if using https
+                cookieDomain = undefined; // No domain for localhost
+                sameSite = 'Lax'; // Lax works better for localhost
+            } 
+            // For workers.dev, don't set domain (browser will use current domain)
+            else if (hostname.includes('.workers.dev')) {
+                cookieDomain = undefined; // No domain attribute for workers.dev
+                secure = true; // workers.dev always uses https
+                sameSite = 'Lax'; // Lax allows cross-domain navigation
+            }
+            // For custom domains, set explicit domain
+            else {
+                // Extract root domain (e.g., example.com from app.example.com)
+                const parts = hostname.split('.');
+                if (parts.length >= 2) {
+                    cookieDomain = parts.slice(-2).join('.'); // Get last two parts
+                }
+                secure = protocol === 'https:'; // Secure based on protocol
+                sameSite = 'Lax'; // Lax for custom domains too
+            }
+        }
+        
         const cookie = createSecureCookie({
             name: this.COOKIE_NAME,
             value: JSON.stringify(tokenData),
-            sameSite: 'Strict',
-            maxAge
+            sameSite,
+            maxAge,
+            secure,
+            domain: cookieDomain,
         });
         response.headers.append('Set-Cookie', cookie);
     }
@@ -233,11 +270,11 @@ export class CsrfService {
     /**
      * Rotate CSRF token (generate new token and invalidate old one)
      */
-    static rotateToken(response: Response): string {
+    static rotateToken(response: Response, request?: Request): string {
         const newToken = this.generateToken();
         const maxAge = Math.floor(this.defaults.tokenTTL / 1000);
         
-        this.setTokenCookie(response, newToken, maxAge);
+        this.setTokenCookie(response, newToken, maxAge, request);
         logger.info('CSRF token rotated');
         
         return newToken;

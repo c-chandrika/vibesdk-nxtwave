@@ -176,6 +176,7 @@ export function createSecureCookie(options: CookieOptions): string {
 
 /**
  * Set auth cookies with proper security settings
+ * Domain-aware: cookies are set for the request origin (localhost or workers.dev)
  */
 export function setSecureAuthCookies(
 	response: Response,
@@ -183,11 +184,42 @@ export function setSecureAuthCookies(
 		accessToken: string;
 		accessTokenExpiry?: number; // seconds
 	},
+	request?: Request,
 ): void {
 	const {
 		accessToken,
 		accessTokenExpiry = 3 * 24 * 60 * 60, // 3 days
 	} = tokens;
+
+	// Determine cookie domain based on request origin
+	let cookieDomain: string | undefined;
+	let secure = true;
+	
+	if (request) {
+		const url = new URL(request.url);
+		const hostname = url.hostname;
+		const protocol = url.protocol;
+		
+		// For localhost, don't set domain and use http (secure=false for local dev)
+		if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.includes('localhost')) {
+			secure = protocol === 'https:'; // Only secure if using https
+			cookieDomain = undefined; // No domain for localhost
+		} 
+		// For workers.dev, don't set domain (browser will use current domain)
+		else if (hostname.includes('.workers.dev')) {
+			cookieDomain = undefined; // No domain attribute for workers.dev
+			secure = true; // workers.dev always uses https
+		}
+		// For custom domains, set explicit domain
+		else {
+			// Extract root domain (e.g., example.com from app.example.com)
+			const parts = hostname.split('.');
+			if (parts.length >= 2) {
+				cookieDomain = parts.slice(-2).join('.'); // Get last two parts
+			}
+			secure = protocol === 'https:'; // Secure based on protocol
+		}
+	}
 
 	// Set access token cookie
 	response.headers.append(
@@ -197,6 +229,8 @@ export function setSecureAuthCookies(
 			value: accessToken,
 			maxAge: accessTokenExpiry,
 			sameSite: 'Lax',
+			secure,
+			domain: cookieDomain,
 		}),
 	);
 }
