@@ -11,6 +11,9 @@ import { AiGatewayAnalyticsService } from '../../../services/analytics/AiGateway
 import { UserAnalyticsResponseData, AgentAnalyticsResponseData } from './types';
 import { AnalyticsError } from '../../../services/analytics/types';
 import { createLogger } from '../../../logger';
+import { extractToken } from '../../../utils/authUtils';
+import { AuthService } from '../../../database/services/AuthService';
+import { SecurityError, SecurityErrorType } from 'shared/types/errors';
 
 export class AnalyticsController extends BaseController {
     static logger = createLogger('AnalyticsController');
@@ -106,8 +109,45 @@ export class AnalyticsController extends BaseController {
 		context: RouteContext,
 	): Promise<ControllerResponse<ApiResponse<AgentAnalyticsResponseData>>> {
 		try {
-			// Extract authenticated user from context
-			const authUser = context.user!;
+			// Validate token and get user
+			const token = extractToken(request);
+			if (!token) {
+				return AnalyticsController.createErrorResponse<AgentAnalyticsResponseData>(
+					new SecurityError(
+						SecurityErrorType.UNAUTHORIZED,
+						'Authentication token is required',
+						401
+					),
+					401
+				);
+			}
+			
+			const authService = new AuthService(env);
+			const auth = await authService.validateTokenAndGetUser(token, env);
+			if (!auth) {
+				return AnalyticsController.createErrorResponse<AgentAnalyticsResponseData>(
+					new SecurityError(
+						SecurityErrorType.UNAUTHORIZED,
+						'Invalid or expired authentication token',
+						401
+					),
+					401
+				);
+			}
+			
+			// Reject requests without sessionId
+			if (!auth.sessionId) {
+				return AnalyticsController.createErrorResponse<AgentAnalyticsResponseData>(
+					new SecurityError(
+						SecurityErrorType.UNAUTHORIZED,
+						'Session ID is required',
+						401
+					),
+					401
+				);
+			}
+			
+			const authUser = auth.user;
 			// Extract route parameters
 			const agentId = context.pathParams.id;
 

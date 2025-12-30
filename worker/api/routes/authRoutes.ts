@@ -40,6 +40,9 @@ export function setupAuthRoutes(app: Hono<AppEnv>): void {
     // SDK: exchange API key for short-lived access token
     authRouter.post('/exchange-api-key', setAuthLevel(AuthConfig.public), adaptController(AuthController, AuthController.exchangeApiKey));
     
+    // Auto-login using external JWT
+    authRouter.post('/auto-login', setAuthLevel(AuthConfig.public), adaptController(AuthController, AuthController.autoLogin));
+    
     // OAuth routes (under /oauth path to avoid conflicts)
     authRouter.get('/oauth/:provider', setAuthLevel(AuthConfig.public), adaptController(AuthController, AuthController.initiateOAuth));
     authRouter.get('/callback/:provider', setAuthLevel(AuthConfig.public), adaptController(AuthController, AuthController.handleOAuthCallback));

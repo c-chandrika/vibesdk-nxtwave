@@ -45,6 +45,7 @@ import type{
 	ActiveSessionsData,
 	ApiKeysData,
 	LoginResponseData,
+	AutoLoginResponseData,
 	RegisterResponseData,
 	ProfileResponseData,
 	AuthProvidersResponseData,
@@ -167,8 +168,19 @@ class ApiClient {
 	private getAuthHeaders(): Record<string, string> {
 		const headers: Record<string, string> = {};
 
+		// Priority 1: Use stored VibeSDK accessToken from auto-login (never use main-app JWT after this)
+		const vibeSdkToken = localStorage.getItem('vibesdk_access_token');
+		if (vibeSdkToken) {
+			headers['Authorization'] = `Bearer ${vibeSdkToken}`;
+			// Add CSRF token for state-changing requests
+			if (this.csrfTokenInfo && !this.isCSRFTokenExpired()) {
+				headers['X-CSRF-Token'] = this.csrfTokenInfo.token;
+			}
+			return headers;
+		}
+
+		// Priority 2: Use cookies for cookie-based auth (localhost)
 		// Add session token for anonymous users if not authenticated
-		// This will be handled automatically by cookies/credentials for authenticated users
 		const sessionToken = localStorage.getItem('anonymous_session_token');
 		if (sessionToken && !document.cookie.includes('session=')) {
 			headers['X-Session-Token'] = sessionToken;
@@ -1173,6 +1185,19 @@ class ApiClient {
 	 */
 	async getAuthProviders(): Promise<ApiResponse<AuthProvidersResponseData>> {
 		return this.request<AuthProvidersResponseData>('/api/auth/providers');
+	}
+
+	/**
+	 * Auto-login using external JWT from main app
+	 * Verifies external JWT and returns VibeSDK access token
+	 */
+	async autoLogin(externalJwt: string): Promise<ApiResponse<AutoLoginResponseData>> {
+		return this.request<AutoLoginResponseData>('/api/auth/auto-login', {
+			method: 'POST',
+			headers: {
+				'Authorization': `Bearer ${externalJwt}`,
+			},
+		});
 	}
 
 	/**

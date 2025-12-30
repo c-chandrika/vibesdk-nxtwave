@@ -768,4 +768,47 @@ export class AuthController extends BaseController {
             return AuthController.createErrorResponse('Failed to get authentication providers', 500);
         }
     }
+
+    /**
+     * Auto-login using external JWT from main app
+     * POST /api/auth/auto-login
+     * Authorization: Bearer <external-jwt>
+     */
+    static async autoLogin(request: Request, env: Env, _ctx: ExecutionContext, _routeContext: RouteContext): Promise<Response> {
+        try {
+            // Extract JWT from Authorization header
+            const authHeader = request.headers.get('Authorization');
+            if (!authHeader || !authHeader.startsWith('Bearer ')) {
+                return AuthController.createErrorResponse(
+                    'Missing or invalid Authorization header. Expected: Bearer <token>',
+                    401
+                );
+            }
+
+            const externalJwt = authHeader.substring(7).trim();
+            if (!externalJwt) {
+                return AuthController.createErrorResponse(
+                    'JWT token is required',
+                    401
+                );
+            }
+
+            // Perform auto-login
+            const authService = new AuthService(env);
+            const result = await authService.autoLogin(externalJwt, request);
+
+            // Return explicit auth payload
+            return AuthController.createSuccessResponse({
+                accessToken: result.accessToken,
+                sessionId: result.sessionId,
+                expiresAt: result.expiresAt,
+            });
+        } catch (error) {
+            if (error instanceof SecurityError) {
+                return AuthController.createErrorResponse(error.message, error.statusCode);
+            }
+
+            return AuthController.handleError(error, 'auto-login');
+        }
+    }
 }

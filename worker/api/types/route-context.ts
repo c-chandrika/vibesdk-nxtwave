@@ -6,6 +6,15 @@ import { GlobalConfigurableSettings } from '../../config';
 import { AuthUser } from '../../types/auth-types';
 
 /**
+ * Agent context containing user and session information for agent operations
+ */
+export interface AgentContext {
+	userId: string;
+	sessionId: string;
+	environment: string;
+}
+
+/**
  * Route context containing authenticated user and path parameters
  */
 export interface RouteContext {
@@ -33,6 +42,11 @@ export interface RouteContext {
 	 * Query parameters from the URL
 	 */
 	queryParams: URLSearchParams;
+
+	/**
+	 * Agent context for agent operations (set before invoking agent logic)
+	 */
+	agentContext?: AgentContext;
 }
 
 /**

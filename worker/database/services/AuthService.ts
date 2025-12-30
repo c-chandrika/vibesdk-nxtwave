@@ -27,6 +27,8 @@ import { createLogger } from '../../logger';
 import { validateEmail, validatePassword } from '../../utils/validationUtils';
 import { extractRequestMetadata } from '../../utils/authUtils';
 import { BaseService } from './BaseService';
+import { getAuthMode } from '../../utils/authMode';
+import { jwtVerify } from 'jose';
 
 const logger = createLogger('AuthService');
 
@@ -178,6 +180,24 @@ export class AuthService extends BaseService {
      */
     async login(credentials: LoginCredentials, request: Request): Promise<AuthResult> {
         try {
+            // Check authentication mode - email/password login only allowed with cookie auth
+            // Exception: localhost supports BOTH cookie and token auth for testing embedded mode
+            const url = new URL(request.url);
+            const hostname = url.hostname;
+            const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname.includes('localhost');
+            
+            // Only restrict email/password login if not on localhost
+            if (!isLocalhost) {
+                const authMode = getAuthMode(request, this.env);
+                if (authMode === 'token') {
+                    throw new SecurityError(
+                        SecurityErrorType.INVALID_INPUT,
+                        'Email/password login is not available in token authentication mode. Please use OAuth or token-based authentication.',
+                        403
+                    );
+                }
+            }
+
             // Find user
             const user = await this.database
                 .select()
@@ -827,6 +847,80 @@ export class AuthService extends BaseService {
             throw new SecurityError(
                 SecurityErrorType.INVALID_INPUT,
                 'Failed to resend verification code',
+                500
+            );
+        }
+    }
+
+    /**
+     * Auto-login using external JWT from main app
+     * Verifies external JWT and creates VibeSDK session
+     */
+    async autoLogin(externalJwt: string, request: Request): Promise<AuthResult> {
+        try {
+            // Check if external JWT secret is configured
+            if (!this.env.EXTERNAL_JWT_SECRET) {
+                throw new SecurityError(
+                    SecurityErrorType.INVALID_INPUT,
+                    'External JWT authentication is not configured',
+                    500
+                );
+            }
+
+            // Verify external JWT
+            const jwtSecret = new TextEncoder().encode(this.env.EXTERNAL_JWT_SECRET);
+            let payload: any;
+            
+            try {
+                const { payload: verifiedPayload } = await jwtVerify(externalJwt, jwtSecret);
+                payload = verifiedPayload;
+            } catch (error) {
+                logger.warn('External JWT verification failed', error);
+                throw new SecurityError(
+                    SecurityErrorType.INVALID_TOKEN,
+                    'Invalid or expired external JWT',
+                    401
+                );
+            }
+
+            // Extract userId from JWT payload
+            const userId = payload.userId as string;
+            if (!userId) {
+                throw new SecurityError(
+                    SecurityErrorType.INVALID_TOKEN,
+                    'External JWT missing required claim: userId',
+                    401
+                );
+            }
+
+            // Always create VibeSDK session using the userId from the external JWT
+            const { accessToken, session } = await this.sessionService.createSession(
+                userId,
+                request
+            );
+
+            logger.info('Auto-login successful', { userId });
+
+            // Return explicit auth payload
+            return {
+                user: {
+                    id: userId,
+                    email: (payload.email as string) || '',
+                    isAnonymous: false,
+                },
+                accessToken,
+                sessionId: session.sessionId,
+                expiresAt: session.expiresAt,
+            };
+        } catch (error) {
+            if (error instanceof SecurityError) {
+                throw error;
+            }
+
+            logger.error('Auto-login error', error);
+            throw new SecurityError(
+                SecurityErrorType.UNAUTHORIZED,
+                'Auto-login failed',
                 500
             );
         }

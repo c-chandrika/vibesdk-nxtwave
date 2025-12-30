@@ -253,6 +253,12 @@ export type {
 // Auth API Response Types (using existing worker types)
 export type LoginResponseData = SessionResponse;
 
+export type AutoLoginResponseData = {
+	accessToken: string;
+	sessionId: string;
+	expiresAt: Date | null;
+};
+
 export type RegisterResponseData = SessionResponse & {
   requiresVerification?: boolean;
 };

@@ -187,21 +187,22 @@ export class RateLimitService {
 	static async enforceAppCreationRateLimit(
 		env: Env,
 		config: RateLimitSettings,
-		user: AuthUser,
+		sessionId: string,
 		request: Request
 	): Promise<void> {
 		if (!config[RateLimitType.APP_CREATION].enabled) {
 			return;
 		}
-		const identifier = await this.getUserIdentifier(user);
+		// Use sessionId as the rate limit key (session-based instead of IP-based)
+		const rateLimitKey = sessionId;
 
-		const key = this.buildRateLimitKey(RateLimitType.APP_CREATION, identifier);
+		const key = this.buildRateLimitKey(RateLimitType.APP_CREATION, rateLimitKey);
 		
 		try {
             const result = await this.enforce(env, key, config, RateLimitType.APP_CREATION);
 			if (!result.success) {
 				this.logger.warn('App creation rate limit exceeded', {
-					identifier,
+					rateLimitKey,
 					key,
 					exceededLimit: result.exceededLimit,
 					limitValue: result.limitValue,
@@ -210,7 +211,7 @@ export class RateLimitService {
 				});
 				captureSecurityEvent('rate_limit_exceeded', {
 					limitType: RateLimitType.APP_CREATION,
-					identifier,
+					rateLimitKey,
 					key,
 					exceededLimit: result.exceededLimit,
 					userAgent: request.headers.get('User-Agent') || undefined,

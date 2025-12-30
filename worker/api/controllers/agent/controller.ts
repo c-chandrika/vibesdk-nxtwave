@@ -22,6 +22,8 @@ import { getPreviewDomain } from 'worker/utils/urls';
 import { ImageType, uploadImage } from 'worker/utils/images';
 import { ProcessedImageAttachment } from 'worker/types/image-attachment';
 import { getTemplateImportantFiles } from 'worker/services/sandbox/utils';
+import { extractToken } from '../../../utils/authUtils';
+import { AuthService } from '../../../database/services/AuthService';
 
 const defaultCodeGenArgs: Partial<CodeGenArgs> = {
     language: 'typescript',
@@ -89,10 +91,48 @@ export class CodingAgentController extends BaseController {
                 }
             });
             const writer = writable.getWriter();
-            // Check if user is authenticated (required for app creation)
-            const user = context.user!;
+            
+            // Validate token and get user (required for app creation)
+            const token = extractToken(request);
+            if (!token) {
+                throw new SecurityError(
+                    SecurityErrorType.UNAUTHORIZED,
+                    'Authentication token is required',
+                    401
+                );
+            }
+            
+            const authService = new AuthService(env);
+            const auth = await authService.validateTokenAndGetUser(token, env);
+            if (!auth) {
+                throw new SecurityError(
+                    SecurityErrorType.UNAUTHORIZED,
+                    'Invalid or expired authentication token',
+                    401
+                );
+            }
+            
+            // Reject requests without sessionId
+            if (!auth.sessionId) {
+                throw new SecurityError(
+                    SecurityErrorType.UNAUTHORIZED,
+                    'Session ID is required',
+                    401
+                );
+            }
+            
+            const user = auth.user;
+            
+            // Build agentContext before invoking agent logic
+            context.agentContext = {
+                userId: auth.user.id,
+                sessionId: auth.sessionId,
+                environment: env.ENVIRONMENT || 'development'
+            };
+            
             try {
-                await RateLimitService.enforceAppCreationRateLimit(env, context.config.security.rateLimit, user, request);
+                // Use sessionId for rate limiting (session-based instead of IP-based)
+                await RateLimitService.enforceAppCreationRateLimit(env, context.config.security.rateLimit, auth.sessionId, request);
             } catch (error) {
                 if (error instanceof Error) {
                     return CodingAgentController.createErrorResponse(error, 429);
@@ -232,11 +272,50 @@ export class CodingAgentController extends BaseController {
                 return new Response('Forbidden: Invalid origin', { status: 403 });
             }
 
-            // Extract user for rate limiting
-            const user = context.user!;
-            if (!user) {
-                return CodingAgentController.createErrorResponse('Missing user', 401);
+            // Validate token and get user
+            const token = extractToken(request);
+            if (!token) {
+                return CodingAgentController.createErrorResponse(
+                    new SecurityError(
+                        SecurityErrorType.UNAUTHORIZED,
+                        'Authentication token is required',
+                        401
+                    ),
+                    401
+                );
             }
+            
+            const authService = new AuthService(env);
+            const auth = await authService.validateTokenAndGetUser(token, env);
+            if (!auth) {
+                return CodingAgentController.createErrorResponse(
+                    new SecurityError(
+                        SecurityErrorType.UNAUTHORIZED,
+                        'Invalid or expired authentication token',
+                        401
+                    ),
+                    401
+                );
+            }
+            
+            // Reject requests without sessionId
+            if (!auth.sessionId) {
+                return CodingAgentController.createErrorResponse(
+                    new SecurityError(
+                        SecurityErrorType.UNAUTHORIZED,
+                        'Session ID is required',
+                        401
+                    ),
+                    401
+                );
+            }
+            
+            // Build agentContext before invoking agent logic
+            context.agentContext = {
+                userId: auth.user.id,
+                sessionId: auth.sessionId,
+                environment: env.ENVIRONMENT || 'development'
+            };
 
             this.logger.info(`WebSocket connection request for chat: ${chatId}`);
             
@@ -295,6 +374,51 @@ export class CodingAgentController extends BaseController {
         context: RouteContext
     ): Promise<ControllerResponse<ApiResponse<AgentConnectionData>>> {
         try {
+            // Validate token and get user
+            const token = extractToken(request);
+            if (!token) {
+                return CodingAgentController.createErrorResponse<AgentConnectionData>(
+                    new SecurityError(
+                        SecurityErrorType.UNAUTHORIZED,
+                        'Authentication token is required',
+                        401
+                    ),
+                    401
+                );
+            }
+            
+            const authService = new AuthService(env);
+            const auth = await authService.validateTokenAndGetUser(token, env);
+            if (!auth) {
+                return CodingAgentController.createErrorResponse<AgentConnectionData>(
+                    new SecurityError(
+                        SecurityErrorType.UNAUTHORIZED,
+                        'Invalid or expired authentication token',
+                        401
+                    ),
+                    401
+                );
+            }
+            
+            // Reject requests without sessionId
+            if (!auth.sessionId) {
+                return CodingAgentController.createErrorResponse<AgentConnectionData>(
+                    new SecurityError(
+                        SecurityErrorType.UNAUTHORIZED,
+                        'Session ID is required',
+                        401
+                    ),
+                    401
+                );
+            }
+            
+            // Build agentContext before invoking agent logic
+            context.agentContext = {
+                userId: auth.user.id,
+                sessionId: auth.sessionId,
+                environment: env.ENVIRONMENT || 'development'
+            };
+            
             const agentId = context.pathParams.agentId;
             if (!agentId) {
                 return CodingAgentController.createErrorResponse<AgentConnectionData>('Missing agent ID parameter', 400);
@@ -331,12 +455,57 @@ export class CodingAgentController extends BaseController {
     }
 
     static async deployPreview(
-        _request: Request,
+        request: Request,
         env: Env,
         _: ExecutionContext,
         context: RouteContext
     ): Promise<ControllerResponse<ApiResponse<AgentPreviewResponse>>> {
         try {
+            // Validate token and get user
+            const token = extractToken(request);
+            if (!token) {
+                return CodingAgentController.createErrorResponse<AgentPreviewResponse>(
+                    new SecurityError(
+                        SecurityErrorType.UNAUTHORIZED,
+                        'Authentication token is required',
+                        401
+                    ),
+                    401
+                );
+            }
+            
+            const authService = new AuthService(env);
+            const auth = await authService.validateTokenAndGetUser(token, env);
+            if (!auth) {
+                return CodingAgentController.createErrorResponse<AgentPreviewResponse>(
+                    new SecurityError(
+                        SecurityErrorType.UNAUTHORIZED,
+                        'Invalid or expired authentication token',
+                        401
+                    ),
+                    401
+                );
+            }
+            
+            // Reject requests without sessionId
+            if (!auth.sessionId) {
+                return CodingAgentController.createErrorResponse<AgentPreviewResponse>(
+                    new SecurityError(
+                        SecurityErrorType.UNAUTHORIZED,
+                        'Session ID is required',
+                        401
+                    ),
+                    401
+                );
+            }
+            
+            // Build agentContext before invoking agent logic
+            context.agentContext = {
+                userId: auth.user.id,
+                sessionId: auth.sessionId,
+                environment: env.ENVIRONMENT || 'development'
+            };
+            
             const agentId = context.pathParams.agentId;
             if (!agentId) {
                 return CodingAgentController.createErrorResponse<AgentPreviewResponse>('Missing agent ID parameter', 400);

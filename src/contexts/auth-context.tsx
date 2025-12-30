@@ -182,7 +182,54 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const initAuth = async () => {
       await fetchAuthProviders();
-      await checkAuth();
+      
+      // Check for auto-login token in URL
+      const urlParams = new URLSearchParams(window.location.search);
+      const externalToken = urlParams.get('token');
+      
+      if (externalToken) {
+        // Remove token from URL immediately to prevent re-processing
+        const newUrl = new URL(window.location.href);
+        newUrl.searchParams.delete('token');
+        window.history.replaceState({}, '', newUrl.toString());
+
+        try {
+          setIsLoading(true);
+          const response = await apiClient.autoLogin(externalToken);
+
+          if (response.success && response.data) {
+            // Store VibeSDK access token (never use main-app JWT after this)
+            localStorage.setItem('vibesdk_access_token', response.data.accessToken);
+            
+            // Store session info
+            setSession({
+              userId: '', // Will be fetched from profile
+              email: '',
+              sessionId: response.data.sessionId,
+              expiresAt: response.data.expiresAt ? new Date(response.data.expiresAt) : null,
+            });
+
+            // Fetch user profile to get user details
+            await checkAuth();
+          } else {
+            setError('Auto-login failed. Please try logging in again.');
+            await checkAuth(); // Still check auth in case of failure
+          }
+        } catch (error) {
+          console.error('Auto-login error:', error);
+          if (error instanceof ApiError) {
+            setError(error.message);
+          } else {
+            setError('Auto-login failed. Please try logging in again.');
+          }
+          await checkAuth(); // Still check auth in case of error
+        } finally {
+          setIsLoading(false);
+        }
+      } else {
+        // No token in URL, proceed with normal auth check
+        await checkAuth();
+      }
     };
     initAuth();
   }, [fetchAuthProviders, checkAuth]);
@@ -287,6 +334,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(null);
       setToken(null);
       setSession(null);
+      
+      // Clear stored VibeSDK access token (never use main-app JWT after this)
+      localStorage.removeItem('vibesdk_access_token');
+      
       if (refreshTimerRef.current) {
         clearInterval(refreshTimerRef.current);
       }

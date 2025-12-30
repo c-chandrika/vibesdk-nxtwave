@@ -1,6 +1,7 @@
 # Security Configuration
 #CUSTOM_DOMAIN="your-domain.com" # Your custom domain for CORS
 #ENVIRONMENT="prod" # Options: dev, staging, prod
+#AUTH_MODE="cookie" # Options: "cookie" (default for localhost) or "token" (default for workers.dev). Auto-detected if not set.
 
 # Cloudflare Credentials (Required for manual deployment via `bun run deploy`)
 # These are automatically provided when using "Deploy to Cloudflare" button
@@ -32,7 +33,8 @@ GOOGLE_AI_STUDIO_API_KEY=""
 
 # Secrets for various internal services of this platform
 JWT_SECRET="" 
-WEBHOOK_SECRET="" 
+WEBHOOK_SECRET=""
+#EXTERNAL_JWT_SECRET="" # Shared secret for verifying external JWTs from main app (for auto-login) 
 
 # AI Gateway URL Override (Leave as-is if not going to set it)
 #CLOUDFLARE_AI_GATEWAY_URL=""
