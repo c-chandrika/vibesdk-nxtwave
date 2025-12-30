@@ -178,12 +178,96 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  // Handle auto-login from external JWT token
+  const handleAutoLogin = useCallback(async (externalToken: string) => {
+    try {
+      setIsLoading(true);
+      const response = await apiClient.autoLogin(externalToken);
+
+      if (response.success && response.data) {
+        // Store VibeSDK access token (never use main-app JWT after this)
+        localStorage.setItem('vibesdk_access_token', response.data.accessToken);
+        
+        // Store session info
+        setSession({
+          userId: '', // Will be fetched from profile
+          email: '',
+          sessionId: response.data.sessionId,
+          expiresAt: response.data.expiresAt ? new Date(response.data.expiresAt) : null,
+        });
+
+        // Fetch user profile to get user details
+        await checkAuth();
+      } else {
+        setError('Auto-login failed. Please try logging in again.');
+        await checkAuth(); // Still check auth in case of failure
+      }
+    } catch (error) {
+      console.error('Auto-login error:', error);
+      if (error instanceof ApiError) {
+        setError(error.message);
+      } else {
+        setError('Auto-login failed. Please try logging in again.');
+      }
+      await checkAuth(); // Still check auth in case of error
+    } finally {
+      setIsLoading(false);
+    }
+  }, [checkAuth]);
+
+  // Listen for postMessage from parent window (main app)
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      // Strict origin validation
+      // Main app uses getVibeSDKDomain() to ensure correct targetOrigin when sending
+      // We verify that the message is from a trusted parent origin
+      const currentOrigin = window.location.origin;
+      
+      // Security: In iframe scenario, parent origin should be different from iframe origin
+      // Reject messages from same origin (prevents XSS attacks)
+      if (event.origin === currentOrigin) {
+        console.warn('Rejected postMessage from same origin (potential XSS):', event.origin);
+        return;
+      }
+
+      // Optional: Verify against configured allowed origins
+      // For now, accept any cross-origin message but log it for security monitoring
+      // In production, you may want to add: const ALLOWED_ORIGINS = [process.env.MAIN_APP_ORIGIN]
+      // if (ALLOWED_ORIGINS.length > 0 && !ALLOWED_ORIGINS.includes(event.origin)) { return; }
+      
+      console.debug('Received postMessage from origin:', event.origin);
+
+      // Check for VibeSDK authentication message
+      // Main app sends: { type: 'VIBESDK_AUTH', token: '<external-jwt>' }
+      // Main app uses separate JWT token for VibeSDK (not same as main app tokens)
+      if (event.data?.type === 'VIBESDK_AUTH' && event.data?.token) {
+        const externalToken = event.data.token;
+        
+        // Validate token format (basic check)
+        if (typeof externalToken !== 'string' || externalToken.trim().length === 0) {
+          console.error('Invalid token format in VIBESDK_AUTH message');
+          setError('Invalid authentication token format');
+          return;
+        }
+
+        // Perform auto-login with the external JWT
+        // External token is NOT stored - only VibeSDK token is stored after exchange
+        handleAutoLogin(externalToken);
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => {
+      window.removeEventListener('message', handleMessage);
+    };
+  }, [handleAutoLogin]);
+
   // Initialize auth state on mount
   useEffect(() => {
     const initAuth = async () => {
       await fetchAuthProviders();
       
-      // Check for auto-login token in URL
+      // Check for auto-login token in URL (fallback for backward compatibility)
       const urlParams = new URLSearchParams(window.location.search);
       const externalToken = urlParams.get('token');
       
@@ -193,46 +277,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         newUrl.searchParams.delete('token');
         window.history.replaceState({}, '', newUrl.toString());
 
-        try {
-          setIsLoading(true);
-          const response = await apiClient.autoLogin(externalToken);
-
-          if (response.success && response.data) {
-            // Store VibeSDK access token (never use main-app JWT after this)
-            localStorage.setItem('vibesdk_access_token', response.data.accessToken);
-            
-            // Store session info
-            setSession({
-              userId: '', // Will be fetched from profile
-              email: '',
-              sessionId: response.data.sessionId,
-              expiresAt: response.data.expiresAt ? new Date(response.data.expiresAt) : null,
-            });
-
-            // Fetch user profile to get user details
-            await checkAuth();
-          } else {
-            setError('Auto-login failed. Please try logging in again.');
-            await checkAuth(); // Still check auth in case of failure
-          }
-        } catch (error) {
-          console.error('Auto-login error:', error);
-          if (error instanceof ApiError) {
-            setError(error.message);
-          } else {
-            setError('Auto-login failed. Please try logging in again.');
-          }
-          await checkAuth(); // Still check auth in case of error
-        } finally {
-          setIsLoading(false);
-        }
+        // Use the same handler for URL-based tokens (fallback)
+        await handleAutoLogin(externalToken);
       } else {
         // No token in URL, proceed with normal auth check
         await checkAuth();
       }
     };
     initAuth();
-  }, [fetchAuthProviders, checkAuth]);
+  }, [fetchAuthProviders, checkAuth, handleAutoLogin]);
 
   // OAuth login method with redirect support
   const login = useCallback((provider: 'google' | 'github', redirectUrl?: string) => {

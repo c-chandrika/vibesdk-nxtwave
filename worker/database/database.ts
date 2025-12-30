@@ -7,6 +7,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as Sentry from '@sentry/cloudflare';
 import * as schema from './schema';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
+import { createLogger } from '../logger';
 
 import type { HealthStatusResult } from './types';
 
@@ -36,6 +37,14 @@ export class DatabaseService {
     private readonly enableReplicas: boolean;
 
     constructor(env: Env) {
+        // Log database binding for debugging
+        const logger = createLogger('DatabaseService');
+        logger.info('DatabaseService constructor', {
+            hasDB: !!env.DB,
+            dbType: typeof env.DB,
+            enableReplicas: env.ENABLE_READ_REPLICAS === 'true'
+        });
+        
         const instrumented = Sentry.instrumentD1WithSentry(env.DB);
         this.d1 = instrumented;
         this.db = drizzle(instrumented, { schema });

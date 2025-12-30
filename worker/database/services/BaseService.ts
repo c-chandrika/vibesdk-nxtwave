@@ -16,6 +16,13 @@ export abstract class BaseService {
     protected db: DatabaseService;
     protected env: Env;
     constructor(env: Env) {
+        // Log database binding for debugging
+        this.logger.info('BaseService constructor', {
+            hasDB: !!env.DB,
+            dbType: typeof env.DB,
+            envKeys: Object.keys(env).filter(key => key.includes('DB') || key.includes('DATABASE'))
+        });
+        
         this.db = createDatabaseService(env);
         this.env = env;
     }

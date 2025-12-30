@@ -68,6 +68,18 @@ export class AuthService extends BaseService {
     /**
      * Register a new user
      */
+    /**
+     * Register a new user with email and password
+     * 
+     * WARNING: Email/password registration should NEVER be invoked in token authentication mode.
+     * Token mode is designed for embedded/API usage where users authenticate via external JWTs.
+     * Email/password operations use PasswordService which is safe for Cloudflare Workers (uses Web Crypto API),
+     * but the registration flow itself is incompatible with token-based authentication.
+     * 
+     * Supported modes:
+     * - Cookie authentication mode (localhost, custom domains)
+     * - Localhost also supports token mode for testing embedded mode
+     */
     async register(data: RegistrationData, request: Request): Promise<AuthResult> {
         try {
             // Validate email format using centralized utility
@@ -107,6 +119,13 @@ export class AuthService extends BaseService {
                     400
                 );
             }
+            
+            // Temporary logging before insert
+            logger.info('Register called', {
+                email: data.email,
+                env: this.env.ENVIRONMENT,
+                hasDb: !!this.database
+            });
             
             // Hash password
             const passwordHash = await this.passwordService.hash(data.password);
@@ -177,6 +196,15 @@ export class AuthService extends BaseService {
     
     /**
      * Login with email and password
+     * 
+     * WARNING: Email/password authentication should NEVER be invoked in token authentication mode.
+     * Token mode is designed for embedded/API usage where users authenticate via external JWTs.
+     * Email/password operations use PasswordService which is safe for Cloudflare Workers (uses Web Crypto API),
+     * but the authentication flow itself is incompatible with token-based authentication.
+     * 
+     * Supported modes:
+     * - Cookie authentication mode (localhost, custom domains)
+     * - Localhost also supports token mode for testing embedded mode
      */
     async login(credentials: LoginCredentials, request: Request): Promise<AuthResult> {
         try {
