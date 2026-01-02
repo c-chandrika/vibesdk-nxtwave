@@ -53,19 +53,8 @@ export function extractToken(request: Request): string | null {
 export function extractTokenWithMetadata(
 	request: Request,
 ): TokenExtractionResult {
-	// Priority 1: Authorization header (most secure)
-	const authHeader = request.headers.get('Authorization');
-	if (authHeader?.startsWith('Bearer ')) {
-		const token = authHeader.substring(7);
-		if (token && token.length > 0) {
-			return {
-				token,
-				method: TokenExtractionMethod.AUTHORIZATION_HEADER,
-			};
-		}
-	}
-
-	// Priority 2: Cookies (secure for browser requests)
+	// Priority 1: Cookies (for browser requests, prefer VibeSDK tokens)
+	// This ensures VibeSDK tokens take precedence over external tokens in Authorization header
 	const cookieHeader = request.headers.get('Cookie');
 	if (cookieHeader) {
 		const cookies = parseCookies(cookieHeader);
@@ -80,6 +69,18 @@ export function extractTokenWithMetadata(
 					cookieName,
 				};
 			}
+		}
+	}
+
+	// Priority 2: Authorization header (for API clients and external tokens)
+	const authHeader = request.headers.get('Authorization');
+	if (authHeader?.startsWith('Bearer ')) {
+		const token = authHeader.substring(7);
+		if (token && token.length > 0) {
+			return {
+				token,
+				method: TokenExtractionMethod.AUTHORIZATION_HEADER,
+			};
 		}
 	}
 
@@ -313,8 +314,13 @@ export function formatAuthResponse(
 	user: AuthUser,
 	sessionId: string,
 	expiresAt: Date | null,
-): SessionResponse {
-	const response: SessionResponse = { user, sessionId, expiresAt };
+	accessToken?: string,
+): SessionResponse & { accessToken?: string } {
+	const response: SessionResponse & { accessToken?: string } = { user, sessionId, expiresAt };
+    
+	if (accessToken) {
+		response.accessToken = accessToken;
+	}
     
 	return response;
 }

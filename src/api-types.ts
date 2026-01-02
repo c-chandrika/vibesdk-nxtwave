@@ -251,7 +251,9 @@ export type {
 } from 'worker/utils/authUtils';
 
 // Auth API Response Types (using existing worker types)
-export type LoginResponseData = SessionResponse;
+export type LoginResponseData = SessionResponse & {
+  accessToken?: string;
+};
 
 export type AutoLoginResponseData = {
 	accessToken: string;
@@ -260,12 +262,15 @@ export type AutoLoginResponseData = {
 };
 
 export type RegisterResponseData = SessionResponse & {
+  accessToken?: string;
   requiresVerification?: boolean;
 };
 
 export type ProfileResponseData = {
   user: AuthUser;
   sessionId: string;
+  accessToken?: string;
+  expiresAt?: Date | null;
 };
 
 export interface AuthProvidersResponseData {

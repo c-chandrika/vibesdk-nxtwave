@@ -165,13 +165,19 @@ class ApiClient {
 	/**
 	 * Get authentication headers for API requests
 	 */
-	private getAuthHeaders(): Record<string, string> {
+	private getAuthHeaders(endpoint?: string): Record<string, string> {
 		const headers: Record<string, string> = {};
 
-		// Priority 1: Use stored VibeSDK accessToken from auto-login (never use main-app JWT after this)
-		const vibeSdkToken = localStorage.getItem('vibesdk_access_token');
-		if (vibeSdkToken) {
-			headers['Authorization'] = `Bearer ${vibeSdkToken}`;
+		// Check if public auth route (can use cookies)
+		const isPublicAuthRoute =
+			endpoint === '/api/auth/login' ||
+			endpoint === '/api/auth/register' ||
+			endpoint === '/api/auth/verify-email' ||
+			endpoint === '/api/auth/csrf-token' ||
+			endpoint === '/api/auth/providers' ||
+			endpoint === '/api/auth/check';
+
+		if (isPublicAuthRoute) {
 			// Add CSRF token for state-changing requests
 			if (this.csrfTokenInfo && !this.isCSRFTokenExpired()) {
 				headers['X-CSRF-Token'] = this.csrfTokenInfo.token;
@@ -179,18 +185,22 @@ class ApiClient {
 			return headers;
 		}
 
-		// Priority 2: Use cookies for cookie-based auth (localhost)
-		// Add session token for anonymous users if not authenticated
-		const sessionToken = localStorage.getItem('anonymous_session_token');
-		if (sessionToken && !document.cookie.includes('session=')) {
-			headers['X-Session-Token'] = sessionToken;
+		// For all other API routes, use Authorization header
+		// Priority 1: VibeSDK access token
+		const vibesdkAccessToken = localStorage.getItem('vibesdk_access_token');
+		if (vibesdkAccessToken) {
+			headers['Authorization'] = `Bearer ${vibesdkAccessToken}`;
+			return headers;
 		}
 
-		// Add CSRF token for state-changing requests
-		if (this.csrfTokenInfo && !this.isCSRFTokenExpired()) {
-			headers['X-CSRF-Token'] = this.csrfTokenInfo.token;
+		// Priority 2: Parent iframe token
+		const parentJwt = localStorage.getItem('vibesdk_token');
+		if (parentJwt) {
+			headers['Authorization'] = `Bearer ${parentJwt}`;
+			return headers;
 		}
 
+		// No token found - will fail auth on backend
 		return headers;
 	}
 
@@ -336,7 +346,7 @@ class ApiClient {
 			method: options.method || 'GET',
 			headers: {
 				...this.defaultHeaders,
-				...this.getAuthHeaders(),
+				...this.getAuthHeaders(endpoint),
 				...options.headers,
 			},
 			credentials: options.credentials || 'include',

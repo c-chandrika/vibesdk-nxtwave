@@ -52,6 +52,8 @@ declare namespace Cloudflare {
 		USE_CLOUDFLARE_IMAGES: string;
 		AUTH_MODE: string;
 		EXTERNAL_JWT_SECRET: string;
+		VIBESDK_SHARED_SECRET: string;
+		ALLOW_EXTERNAL_TOKEN_NO_EXPIRY: string;
 		CodeGenObject: DurableObjectNamespace<import("./worker/index").CodeGeneratorAgent>;
 		Sandbox: DurableObjectNamespace<import("./worker/index").UserAppSandboxService>;
 		DORateLimitStore: DurableObjectNamespace<import("./worker/index").DORateLimitStore>;

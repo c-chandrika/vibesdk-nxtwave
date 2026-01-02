@@ -143,13 +143,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const response = await apiClient.getProfile(true);
       
       if (response.success && response.data?.user) {
+        // Store accessToken if returned
+        const accessToken = response.data.accessToken;
+        if (accessToken) {
+          localStorage.setItem('vibesdk_access_token', accessToken);
+          setToken(accessToken);
+        }
+        
         setUser({ ...response.data.user, isAnonymous: false } as AuthUser);
-        setToken(null); // Profile endpoint doesn't return token, cookies are used
         setSession({
           userId: response.data.user.id,
           email: response.data.user.email,
           sessionId: response.data.sessionId || response.data.user.id,
-          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours expiry
+          expiresAt: response.data.expiresAt || new Date(Date.now() + 24 * 60 * 60 * 1000),
         });
         
         // Setup token refresh
@@ -237,9 +243,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       console.debug('Received postMessage from origin:', event.origin);
 
-      // Check for VibeSDK authentication message
-      // Main app sends: { type: 'VIBESDK_AUTH', token: '<external-jwt>' }
-      // Main app uses separate JWT token for VibeSDK (not same as main app tokens)
+      // Check for VibeSDK authentication messages
+      // Support both old format (VIBESDK_AUTH) and new format (vibesdk-auth, vibesdk-refresh-token)
       if (event.data?.type === 'VIBESDK_AUTH' && event.data?.token) {
         const externalToken = event.data.token;
         
@@ -253,6 +258,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Perform auto-login with the external JWT
         // External token is NOT stored - only VibeSDK token is stored after exchange
         handleAutoLogin(externalToken);
+      } else if (
+        (event.data?.type === 'vibesdk-auth' || event.data?.type === 'vibesdk-refresh-token') &&
+        event.data?.token
+      ) {
+        // Store parent app token for direct use (fallback)
+        const parentToken = event.data.token;
+        if (typeof parentToken === 'string' && parentToken.trim().length > 0) {
+          localStorage.setItem('vibesdk_token', parentToken);
+          console.log('[VibeSDK] Token received from parent and stored');
+          
+          // Try to refresh auth state
+          checkAuth();
+        }
       }
     };
 
@@ -287,7 +305,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     initAuth();
   }, [fetchAuthProviders, checkAuth, handleAutoLogin]);
 
-  // OAuth login method with redirect support
+  // OAuth login method with redirect support and iframe popup mode
   const login = useCallback((provider: 'google' | 'github', redirectUrl?: string) => {
     // Store intended redirect URL if provided, otherwise use current location
     const intendedUrl = redirectUrl || window.location.pathname + window.location.search;
@@ -297,9 +315,59 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const oauthUrl = new URL(`/api/auth/oauth/${provider}`, window.location.origin);
     oauthUrl.searchParams.set('redirect_url', intendedUrl);
     
-    // Redirect to OAuth provider
-    window.location.href = oauthUrl.toString();
-  }, [setIntendedUrl]);
+    // Check if we're in an iframe
+    const isInIframe = window.self !== window.top;
+    
+    if (isInIframe) {
+      // Popup mode for iframe
+      oauthUrl.searchParams.set('popup', 'true');
+      
+      const popup = window.open(
+        oauthUrl.toString(),
+        'oauth-popup',
+        'width=600,height=700,resizable=yes,scrollbars=yes'
+      );
+      
+      // Listen for message from popup
+      const messageHandler = (event: MessageEvent) => {
+        if (event.origin !== window.location.origin) return;
+        
+        if (event.data.type === 'oauth-success') {
+          // Store accessToken
+          const accessToken = event.data.accessToken;
+          if (accessToken) {
+            localStorage.setItem('vibesdk_access_token', accessToken);
+            setToken(accessToken);
+          }
+          
+          // Refresh auth state
+          checkAuth().then(() => {
+            const intended = getIntendedUrl();
+            clearIntendedUrl();
+            navigate(intended || '/');
+          });
+          
+          window.removeEventListener('message', messageHandler);
+        } else if (event.data.type === 'oauth-error') {
+          setError(event.data.error || 'OAuth authentication failed');
+          window.removeEventListener('message', messageHandler);
+        }
+      };
+      
+      window.addEventListener('message', messageHandler);
+      
+      // Cleanup listener if popup is closed manually
+      const checkClosed = setInterval(() => {
+        if (popup?.closed) {
+          clearInterval(checkClosed);
+          window.removeEventListener('message', messageHandler);
+        }
+      }, 1000);
+    } else {
+      // Normal redirect
+      window.location.href = oauthUrl.toString();
+    }
+  }, [setIntendedUrl, checkAuth, getIntendedUrl, clearIntendedUrl, navigate]);
 
   // Email/password login
   const loginWithEmail = useCallback(async (credentials: { email: string; password: string }) => {
@@ -348,8 +416,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const response = await apiClient.register(data);
 
       if (response.success && response.data) {
+        // Store accessToken if provided
+        const accessToken = response.data.accessToken;
+        if (accessToken) {
+          localStorage.setItem('vibesdk_access_token', accessToken);
+          setToken(accessToken);
+        }
+        
         setUser({ ...response.data.user, isAnonymous: false } as AuthUser);
-        setToken(null); // Using cookies for authentication
         setSession({
           userId: response.data.user.id,
           email: response.data.user.email,
@@ -388,8 +462,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setToken(null);
       setSession(null);
       
-      // Clear stored VibeSDK access token (never use main-app JWT after this)
+      // Clear stored VibeSDK tokens
       localStorage.removeItem('vibesdk_access_token');
+      localStorage.removeItem('vibesdk_token');
       
       if (refreshTimerRef.current) {
         clearInterval(refreshTimerRef.current);

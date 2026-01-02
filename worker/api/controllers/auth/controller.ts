@@ -18,7 +18,8 @@ import {
     mapUserResponse,
     setSecureAuthCookies,
 	clearAuthCookies,
-	extractSessionId
+	extractSessionId,
+	extractToken
 } from '../../../utils/authUtils';
 import { JWTUtils } from '../../../utils/jwtUtils';
 import { RouteContext } from '../../types/route-context';
@@ -71,7 +72,7 @@ export class AuthController extends BaseController {
             const result = await authService.register(validatedData, request);
             
             const response = AuthController.createSuccessResponse(
-                formatAuthResponse(result.user, result.sessionId, result.expiresAt)
+                formatAuthResponse(result.user, result.sessionId, result.expiresAt, result.accessToken)
             );
             
             setSecureAuthCookies(response, {
@@ -126,7 +127,7 @@ export class AuthController extends BaseController {
             const result = await authService.login(validatedData, request);
             
             const response = AuthController.createSuccessResponse(
-                formatAuthResponse(result.user, result.sessionId, result.expiresAt)
+                formatAuthResponse(result.user, result.sessionId, result.expiresAt, result.accessToken)
             );
             
             setSecureAuthCookies(response, {
@@ -200,15 +201,28 @@ export class AuthController extends BaseController {
      * Get current user profile
      * GET /api/auth/profile
      */
-    static async getProfile(_request: Request, _env: Env, _ctx: ExecutionContext, routeContext: RouteContext): Promise<Response> {
+    static async getProfile(request: Request, _env: Env, _ctx: ExecutionContext, routeContext: RouteContext): Promise<Response> {
         try {
             if (!routeContext.user) {
                 return AuthController.createErrorResponse('Unauthorized', 401);
             }
-            return AuthController.createSuccessResponse({
+            
+            // Extract token to return it if available
+            const token = extractToken(request);
+            const responseData: any = {
                 user: mapUserResponse(routeContext.user),
                 sessionId: routeContext.sessionId
-            });
+            };
+            
+            // Return accessToken if available (for localStorage storage)
+            if (token) {
+                responseData.accessToken = token;
+            }
+            
+            // Note: expiresAt can be extracted from JWT token payload if needed
+            // The frontend can decode the token to get expiration time
+            
+            return AuthController.createSuccessResponse(responseData);
         } catch (error) {
             return AuthController.handleError(error, 'get profile');
         }
@@ -280,12 +294,14 @@ export class AuthController extends BaseController {
             
             // Get intended redirect URL from query parameter
             const intendedRedirectUrl = routeContext.queryParams.get('redirect_url') || undefined;
+            const isPopup = routeContext.queryParams.get('popup') === 'true';
             
             const authService = new AuthService(env);
             const authUrl = await authService.getOAuthAuthorizationUrl(
                 validatedProvider,
                 request,
-                intendedRedirectUrl
+                intendedRedirectUrl,
+                isPopup
             );
             
             return Response.redirect(authUrl, 302);
@@ -301,6 +317,69 @@ export class AuthController extends BaseController {
     }
     
     /**
+     * Generate CSP nonce for inline scripts
+     */
+    private static generateCSPNonce(): string {
+        const array = new Uint8Array(16);
+        crypto.getRandomValues(array);
+        return btoa(String.fromCharCode(...array)).replace(/[+/=]/g, '');
+    }
+
+    /**
+     * Create popup callback HTML page
+     */
+    private static createPopupCallbackHTML(
+        type: 'success' | 'error',
+        baseUrl: string,
+        redirectLocation?: string,
+        error?: string,
+        accessToken?: string
+    ): { html: string; nonce: string } {
+        const nonce = AuthController.generateCSPNonce();
+        
+        let scriptContent = '';
+        if (type === 'success' && accessToken) {
+            scriptContent = `
+                if (window.opener) {
+                    window.opener.postMessage({
+                        type: 'oauth-success',
+                        accessToken: '${accessToken}'
+                    }, '${baseUrl}');
+                    window.close();
+                } else {
+                    window.location.href = '${redirectLocation || baseUrl + '/'}';
+                }
+            `;
+        } else {
+            scriptContent = `
+                if (window.opener) {
+                    window.opener.postMessage({
+                        type: 'oauth-error',
+                        error: '${error || 'OAuth authentication failed'}'
+                    }, '${baseUrl}');
+                    window.close();
+                } else {
+                    window.location.href = '${baseUrl}/?error=oauth_failed';
+                }
+            `;
+        }
+        
+        return {
+            html: `<!DOCTYPE html>
+<html>
+<head>
+    <title>Authentication</title>
+    <meta http-equiv="Content-Security-Policy" content="script-src 'nonce-${nonce}' 'strict-dynamic';">
+</head>
+<body>
+    <script nonce="${nonce}">${scriptContent}</script>
+</body>
+</html>`,
+            nonce
+        };
+    }
+
+    /**
      * Handle OAuth callback
      * GET /api/auth/callback/:provider
      */
@@ -311,15 +390,32 @@ export class AuthController extends BaseController {
             const code = routeContext.queryParams.get('code');
             const state = routeContext.queryParams.get('state');
             const error = routeContext.queryParams.get('error');
+            const isPopupQuery = routeContext.queryParams.get('popup') === 'true';
+            
+            // Extract popup flag from state if present (OAuth providers require exact redirect_uri match)
+            const stateHasPopup = state?.includes('|popup:true') || false;
+            const isPopup = isPopupQuery || stateHasPopup;
             
             if (error) {
                 this.logger.error('OAuth provider returned error', { provider: validatedProvider, error });
                 const baseUrl = new URL(request.url).origin;
+                
+                if (isPopup) {
+                    const { html } = AuthController.createPopupCallbackHTML('error', baseUrl, undefined, error);
+                    return new Response(html, { headers: { 'Content-Type': 'text/html' } });
+                }
+                
                 return Response.redirect(`${baseUrl}/?error=oauth_failed`, 302);
             }
             
             if (!code || !state) {
                 const baseUrl = new URL(request.url).origin;
+                
+                if (isPopup) {
+                    const { html } = AuthController.createPopupCallbackHTML('error', baseUrl, undefined, 'Missing OAuth parameters');
+                    return new Response(html, { headers: { 'Content-Type': 'text/html' } });
+                }
+                
                 return Response.redirect(`${baseUrl}/?error=missing_params`, 302);
             }
             
@@ -336,7 +432,27 @@ export class AuthController extends BaseController {
             // Use stored redirect URL or default to home page
             const redirectLocation = result.redirectUrl || `${baseUrl}/`;
             
-            // Create redirect response with secure auth cookies
+            if (isPopup) {
+                // Return HTML page with postMessage
+                const { html } = AuthController.createPopupCallbackHTML(
+                    'success',
+                    baseUrl,
+                    redirectLocation,
+                    undefined,
+                    result.accessToken
+                );
+                
+                const response = new Response(html, { headers: { 'Content-Type': 'text/html' } });
+                
+                // Set cookies even in popup
+                setSecureAuthCookies(response, {
+                    accessToken: result.accessToken,
+                }, request);
+                
+                return response;
+            }
+            
+            // Normal redirect
             const response = new Response(null, {
                 status: 302,
                 headers: {
@@ -352,6 +468,13 @@ export class AuthController extends BaseController {
         } catch (error) {
             this.logger.error('OAuth callback failed', error);
             const baseUrl = new URL(request.url).origin;
+            const isPopup = routeContext.queryParams.get('popup') === 'true';
+            
+            if (isPopup) {
+                const { html } = AuthController.createPopupCallbackHTML('error', baseUrl, undefined, 'Authentication failed');
+                return new Response(html, { headers: { 'Content-Type': 'text/html' } });
+            }
+            
             return Response.redirect(`${baseUrl}/?error=auth_failed`, 302);
         }
     }
@@ -656,7 +779,7 @@ export class AuthController extends BaseController {
             const result = await authService.verifyEmailWithOtp(email, otp, request);
             
             const response = AuthController.createSuccessResponse(
-                formatAuthResponse(result.user, result.sessionId, result.expiresAt)
+                formatAuthResponse(result.user, result.sessionId, result.expiresAt, result.accessToken)
             );
             
             setSecureAuthCookies(response, {

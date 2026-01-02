@@ -333,7 +333,8 @@ export class AuthService extends BaseService {
     async getOAuthAuthorizationUrl(
         provider: OAuthProvider,
         request: Request,
-        intendedRedirectUrl?: string
+        intendedRedirectUrl?: string,
+        isPopup?: boolean
     ): Promise<string> {
         const oauthProvider = await this.getOauthProvider(provider, request);
         if (!oauthProvider) {
@@ -354,15 +355,18 @@ export class AuthService extends BaseService {
         }
         
         // Generate state for CSRF protection
-        const state = generateSecureToken();
+        // Encode popup flag in state: state_payload|popup:true/false
+        const statePayload = generateSecureToken();
+        const state = isPopup ? `${statePayload}|popup:true` : statePayload;
         
         // Generate PKCE code verifier
         const codeVerifier = BaseOAuthProvider.generateCodeVerifier();
         
         // Store OAuth state with intended redirect URL
+        // Note: redirectUri stores the post-OAuth redirect, not the OAuth callback URL
         await this.database.insert(schema.oauthStates).values({
             id: generateId(),
-            state,
+            state: statePayload, // Store base state without popup flag
             provider,
             codeVerifier,
             redirectUri: validatedRedirectUrl || oauthProvider['redirectUri'],
@@ -377,7 +381,7 @@ export class AuthService extends BaseService {
         // Get authorization URL
         const authUrl = await oauthProvider.getAuthorizationUrl(state, codeVerifier);
         
-        logger.info('OAuth authorization initiated', { provider });
+        logger.info('OAuth authorization initiated', { provider, isPopup });
         
         return authUrl;
     }
@@ -422,6 +426,9 @@ export class AuthService extends BaseService {
                 );
             }
             
+            // Extract base state (remove popup flag if present)
+            const baseState = state.includes('|popup:') ? state.split('|')[0] : state;
+            
             // Verify state
             const now = new Date();
             const oauthState = await this.database
@@ -429,7 +436,7 @@ export class AuthService extends BaseService {
                 .from(schema.oauthStates)
                 .where(
                     and(
-                        eq(schema.oauthStates.state, state),
+                        eq(schema.oauthStates.state, baseState),
                         eq(schema.oauthStates.provider, provider),
                         eq(schema.oauthStates.isUsed, false)
                     )
@@ -790,36 +797,93 @@ export class AuthService extends BaseService {
     }
     
     /**
-     * Validate token and return user (for middleware)
+     * Validate external token (from parent app) using shared secret
      */
-    async validateTokenAndGetUser(token: string, env: Env): Promise<AuthUserSession | null> {
+    private async validateExternalToken(
+        token: string,
+        env: Env
+    ): Promise<AuthUserSession | null> {
+        if (!env.VIBESDK_SHARED_SECRET) {
+            return null;
+        }
+        
         try {
-            const jwtUtils = JWTUtils.getInstance(env);
-            const payload = await jwtUtils.verifyToken(token);
+            // Use shared secret instead of JWT_SECRET
+            const secret = new TextEncoder().encode(env.VIBESDK_SHARED_SECRET);
+            const { payload } = await jwtVerify(token, secret);
             
-            if (!payload || payload.type !== 'access') {
+            // Validate required claims
+            const sub = payload.sub as string | undefined;
+            const rawExp = payload.exp as number | string | undefined;
+            const rawIat = payload.iat as number | string | undefined;
+            
+            // Handle optional expiration (for parent app tokens)
+            const allowNoExpiry = env.ALLOW_EXTERNAL_TOKEN_NO_EXPIRY === 'true';
+            const expOk = allowNoExpiry || (!!rawExp && !Number.isNaN(Number(rawExp)));
+            
+            if (!sub || !expOk || !rawIat) {
                 return null;
             }
             
-            // Check if token is expired
-            if (payload.exp * 1000 < Date.now()) {
-                logger.debug('Token expired', { exp: payload.exp });
-                return null;
+            // Check expiration (if not disabled)
+            if (!allowNoExpiry && rawExp) {
+                const exp = typeof rawExp === 'number' ? rawExp : Number(rawExp);
+                if (!Number.isNaN(exp) && exp * 1000 < Date.now()) {
+                    return null;
+                }
             }
             
-            // Get user from database
-            const user = await this.getUserForAuth(payload.sub);
+            // Get or create user
+            const user = await this.getUserForAuth(sub);
             if (!user) {
                 return null;
             }
             
             return {
                 user,
-                sessionId: payload.sessionId,
+                sessionId: sub, // Use userId as sessionId for external tokens
             };
         } catch (error) {
-            logger.error('Token validation error', error);
+            logger.debug('External token validation failed', error);
             return null;
+        }
+    }
+
+    /**
+     * Validate token and return user (for middleware)
+     */
+    async validateTokenAndGetUser(token: string, env: Env): Promise<AuthUserSession | null> {
+        try {
+            // First try standard JWT validation
+            const jwtUtils = JWTUtils.getInstance(env);
+            const payload = await jwtUtils.verifyToken(token);
+            
+            if (payload && payload.type === 'access') {
+                // Check if token is expired
+                if (payload.exp * 1000 < Date.now()) {
+                    logger.debug('Token expired', { exp: payload.exp });
+                    return null;
+                }
+                
+                // Get user from database
+                const user = await this.getUserForAuth(payload.sub);
+                if (!user) {
+                    return null;
+                }
+                
+                return {
+                    user,
+                    sessionId: payload.sessionId,
+                };
+            }
+            
+            // If standard validation fails, try external token validation
+            return await this.validateExternalToken(token, env);
+        } catch (error) {
+            logger.error('Token validation error', error);
+            
+            // Try external token validation as fallback
+            return await this.validateExternalToken(token, env);
         }
     }
     

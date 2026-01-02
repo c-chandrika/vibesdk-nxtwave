@@ -7,6 +7,7 @@ import { Toaster } from './components/ui/sonner';
 import { AppLayout } from './components/layout/app-layout';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { FeatureProvider } from './features';
+import { ParentAuthListener } from './components/ParentAuthListener';
 
 export default function App() {
   return (
@@ -16,6 +17,7 @@ export default function App() {
           <AuthProvider>
             <VaultProvider>
               <AuthModalProvider>
+                <ParentAuthListener />
                 <AppLayout>
                   <Outlet />
                 </AppLayout>
